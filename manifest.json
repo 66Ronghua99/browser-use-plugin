@@ -3,6 +3,9 @@
     "name": "AXTree Inspector",
     "version": "1.0",
     "description": "Simplifies DOM tree into a denser abstraction (AXTree) for LLMs.",
+    "permissions": [
+        "nativeMessaging"
+    ],
     "background": {
         "service_worker": "dist/background.js"
     },
