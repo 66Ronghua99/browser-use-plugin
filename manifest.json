@@ -1,0 +1,20 @@
+{
+    "manifest_version": 3,
+    "name": "AXTree Inspector",
+    "version": "1.0",
+    "description": "Simplifies DOM tree into a denser abstraction (AXTree) for LLMs.",
+    "background": {
+        "service_worker": "dist/background.js"
+    },
+    "action": {},
+    "content_scripts": [
+        {
+            "matches": [
+                "<all_urls>"
+            ],
+            "js": [
+                "dist/content.js"
+            ]
+        }
+    ]
+}
