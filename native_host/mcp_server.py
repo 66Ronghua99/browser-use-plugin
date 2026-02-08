@@ -356,6 +356,30 @@ class MCPHandler(BaseHTTPRequestHandler):
             })
             self.send_json(response)
         
+        elif self.path == '/tools/wait_for_element':
+            role = data.get('role')
+            name = data.get('name')
+            timeout = data.get('timeout', 10000)
+            interval = data.get('interval', 500)
+            
+            response = native.send_command('WAIT_FOR_ELEMENT', {
+                'role': role,
+                'name': name,
+                'timeout': timeout,
+                'interval': interval
+            })
+            self.send_json(response)
+        
+        elif self.path == '/tools/wait_for_page_load':
+            timeout = data.get('timeout', 30000)
+            extra_delay = data.get('extra_delay', 500)
+            
+            response = native.send_command('WAIT_FOR_PAGE_LOAD', {
+                'timeout': timeout,
+                'extraDelay': extra_delay
+            })
+            self.send_json(response)
+        
         else:
             self.send_json({'error': 'Unknown endpoint'}, 404)
 

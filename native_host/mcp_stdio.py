@@ -127,6 +127,62 @@ async def list_tools():
                 },
                 "required": ["action_type"]
             }
+        ),
+        Tool(
+            name="browser_wait_for_element",
+            description=(
+                "Wait for an element matching criteria to appear on the page. "
+                "Useful after navigation or dynamic content loading. "
+                "Returns the element's refId when found."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "role": {
+                        "type": "string",
+                        "description": "Role to match (e.g. 'link', 'button', 'textbox')"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Text the element name should contain (partial match)"
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "Max time to wait in ms (default: 10000)",
+                        "default": 10000
+                    },
+                    "interval": {
+                        "type": "integer",
+                        "description": "Check interval in ms (default: 500)",
+                        "default": 500
+                    }
+                },
+                "required": []
+            }
+        ),
+        Tool(
+            name="browser_wait_for_page_load",
+            description=(
+                "Wait for the current page to finish loading. "
+                "Checks document.readyState === 'complete'. "
+                "Useful after clicking a link that navigates to a new page."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "timeout": {
+                        "type": "integer",
+                        "description": "Max time to wait in ms (default: 30000)",
+                        "default": 30000
+                    },
+                    "extra_delay": {
+                        "type": "integer",
+                        "description": "Extra delay after load for dynamic content (default: 500)",
+                        "default": 500
+                    }
+                },
+                "required": []
+            }
         )
     ]
 
@@ -170,6 +226,30 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             "action_type": action_type,
             "ref_id": ref_id,
             "text": text
+        })
+        return [TextContent(type="text", text=json.dumps(result))]
+    
+    elif name == "browser_wait_for_element":
+        role = arguments.get("role")
+        name_contains = arguments.get("name")
+        timeout = arguments.get("timeout", 10000)
+        interval = arguments.get("interval", 500)
+        
+        result = http_post("/tools/wait_for_element", {
+            "role": role,
+            "name": name_contains,
+            "timeout": timeout,
+            "interval": interval
+        })
+        return [TextContent(type="text", text=json.dumps(result))]
+    
+    elif name == "browser_wait_for_page_load":
+        timeout = arguments.get("timeout", 30000)
+        extra_delay = arguments.get("extra_delay", 500)
+        
+        result = http_post("/tools/wait_for_page_load", {
+            "timeout": timeout,
+            "extra_delay": extra_delay
         })
         return [TextContent(type="text", text=json.dumps(result))]
     

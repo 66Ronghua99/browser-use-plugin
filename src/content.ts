@@ -86,6 +86,98 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true;
     }
 
+    // Wait for an element matching criteria to appear
+    if (message.action === 'WAIT_FOR_ELEMENT') {
+        const params = message.params || {};
+        const timeout = params.timeout || 10000;
+        const interval = params.interval || 500;
+        const role = params.role;
+        const nameContains = params.name;
+
+        const startTime = Date.now();
+
+        const checkElement = () => {
+            const compactTree = axTreeManager.captureCompactTree(document.body);
+
+            // Search for matching element
+            for (const item of compactTree) {
+                const [refId, itemRole, itemName] = item;
+
+                const roleMatch = !role || itemRole === role;
+                const nameMatch = !nameContains || (itemName && itemName.includes(nameContains));
+
+                if (roleMatch && nameMatch) {
+                    sendResponse({
+                        success: true,
+                        found: true,
+                        element: { refId, role: itemRole, name: itemName },
+                        waitTime: Date.now() - startTime
+                    });
+                    return;
+                }
+            }
+
+            // Check timeout
+            if (Date.now() - startTime >= timeout) {
+                sendResponse({
+                    success: true,
+                    found: false,
+                    error: `Element not found within ${timeout}ms`,
+                    waitTime: timeout
+                });
+                return;
+            }
+
+            // Retry
+            setTimeout(checkElement, interval);
+        };
+
+        checkElement();
+        return true; // Keep channel open for async response
+    }
+
+    // Wait for page to finish loading
+    if (message.action === 'WAIT_FOR_PAGE_LOAD') {
+        const params = message.params || {};
+        const timeout = params.timeout || 30000;
+        const extraDelay = params.extraDelay || 500; // Extra delay for dynamic content
+
+        const startTime = Date.now();
+
+        const checkLoad = () => {
+            if (document.readyState === 'complete') {
+                // Wait extra delay for dynamic content
+                setTimeout(() => {
+                    sendResponse({
+                        success: true,
+                        loaded: true,
+                        readyState: document.readyState,
+                        url: window.location.href,
+                        title: document.title,
+                        waitTime: Date.now() - startTime
+                    });
+                }, extraDelay);
+                return;
+            }
+
+            if (Date.now() - startTime >= timeout) {
+                sendResponse({
+                    success: true,
+                    loaded: false,
+                    readyState: document.readyState,
+                    error: `Page did not load within ${timeout}ms`,
+                    waitTime: timeout
+                });
+                return;
+            }
+
+            setTimeout(checkLoad, 100);
+        };
+
+        checkLoad();
+        return true;
+    }
+
     return false;
 });
 

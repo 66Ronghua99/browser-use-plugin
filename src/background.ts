@@ -205,6 +205,20 @@ async function handleNativeMessage(message: { id: string; action: string; params
                 params: params
             });
             sendToNativeHost({ id, result: response });
+        } else if (action === 'WAIT_FOR_ELEMENT') {
+            // Wait for element to appear on page
+            const response = await chrome.tabs.sendMessage(tab.id, {
+                action: 'WAIT_FOR_ELEMENT',
+                params: params
+            });
+            sendToNativeHost({ id, result: response });
+        } else if (action === 'WAIT_FOR_PAGE_LOAD') {
+            // Wait for page to finish loading
+            const response = await chrome.tabs.sendMessage(tab.id, {
+                action: 'WAIT_FOR_PAGE_LOAD',
+                params: params
+            });
+            sendToNativeHost({ id, result: response });
         } else {
             sendToNativeHost({ id, error: `Unknown action: ${action}` });
         }
