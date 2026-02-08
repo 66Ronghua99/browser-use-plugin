@@ -2,30 +2,121 @@
 import { computeAccessibleName, getRole } from 'dom-accessibility-api';
 
 export interface AXNode {
-    refId: number;
+    refId?: number;              // Only interactive elements have refId
     role: string;
-    name: string;
-    tagName: string;
-    attributes: Record<string, string>;
+    name?: string;               // Semantic label (from accessible name or ancestor context)
+    tagName?: string;            // Only for interactive elements
+    attributes?: Record<string, string>;
     value?: string | null;
     children?: AXNode[];
+}
+
+// Technical data-* attributes to ignore
+const TECHNICAL_DATA_ATTRS = [
+    'data-v-', 'data-reactroot', 'data-reactid', 'data-testid',
+    'data-cy', 'data-index', 'data-key', 'data-id', 'data-node-key'
+];
+
+// Keywords that suggest a data-* attribute contains semantic label
+const SEMANTIC_DATA_KEYWORDS = /label|name|title|desc|text|field|heading|caption/i;
+
+/**
+ * Extract semantic label from data-* attributes
+ */
+function extractDataLabel(element: Element): string | null {
+    for (const attr of Array.from(element.attributes)) {
+        if (!attr.name.startsWith('data-')) continue;
+        // Skip technical attributes
+        if (TECHNICAL_DATA_ATTRS.some(tech => attr.name.startsWith(tech))) continue;
+        // Check if attribute name suggests semantic value
+        if (SEMANTIC_DATA_KEYWORDS.test(attr.name) && attr.value.trim()) {
+            return attr.value.trim();
+        }
+    }
+    return null;
+}
+
+/**
+ * Get text from aria-labelledby referenced elements
+ */
+function getAriaLabelledByText(element: Element): string | null {
+    const labelledBy = element.getAttribute('aria-labelledby');
+    if (!labelledBy) return null;
+
+    const ids = labelledBy.split(/\s+/);
+    const texts: string[] = [];
+    for (const id of ids) {
+        const labelEl = document.getElementById(id);
+        if (labelEl) {
+            const text = labelEl.textContent?.trim();
+            if (text) texts.push(text);
+        }
+    }
+    return texts.length > 0 ? texts.join(' ') : null;
+}
+
+/**
+ * Get heading text from within a container element
+ */
+function getHeadingText(element: Element): string | null {
+    const heading = element.querySelector('h1, h2, h3, h4, h5, h6');
+    if (heading) {
+        const text = heading.textContent?.trim();
+        if (text && text.length < 100) return text;
+    }
+    return null;
+}
+
+/**
+ * Get legend text from fieldset
+ */
+function getLegendText(element: Element): string | null {
+    if (element.tagName.toLowerCase() === 'fieldset') {
+        const legend = element.querySelector('legend');
+        if (legend) {
+            const text = legend.textContent?.trim();
+            if (text) return text;
+        }
+    }
+    return null;
+}
+
+/**
+ * Comprehensive semantic label extraction with priority
+ */
+function getSemanticLabel(element: Element): string | null {
+    return (
+        element.getAttribute('aria-label') ||
+        getAriaLabelledByText(element) ||
+        extractDataLabel(element) ||
+        getLegendText(element) ||
+        getHeadingText(element) ||
+        null
+    );
 }
 
 export class AXTreeManager {
     private elementMap: Map<number, Element> = new Map();
     private counter: number = 0;
 
-    public capture(root: Element): AXNode[] {
+
+
+    /**
+     * Build a semantic tree that preserves ancestor context for interactive elements
+     */
+    public captureTree(root: Element): AXNode | null {
         this.elementMap.clear();
         this.counter = 0;
-        return this.buildTree(root);
+        const children = this.buildSemanticTree(root);
+        if (children.length === 0) return null;
+        if (children.length === 1) return children[0];
+        return {
+            role: 'tree',
+            children: children
+        };
     }
 
-    public getElement(refId: number): Element | undefined {
-        return this.elementMap.get(refId);
-    }
-
-    private buildTree(element: Element): AXNode[] {
+    private buildSemanticTree(element: Element): AXNode[] {
         const style = window.getComputedStyle(element);
         if (style.display === 'none' || style.visibility === 'hidden' || element.getAttribute('aria-hidden') === 'true') {
             return [];
@@ -33,7 +124,7 @@ export class AXTreeManager {
 
         const tag = element.tagName.toLowerCase();
 
-        // Skip all SVG internals - only keep interactive SVGs as a single unit
+        // Skip SVG internals
         const svgSkip = ['path', 'g', 'defs', 'clippath', 'lineargradient', 'radialgradient', 'stop', 'mask', 'use', 'symbol', 'circle', 'rect', 'ellipse', 'line', 'polygon', 'polyline', 'text', 'tspan', 'style'];
         if (svgSkip.includes(tag)) {
             return [];
@@ -44,62 +135,69 @@ export class AXTreeManager {
         // Recursively get children first
         let children: AXNode[] = [];
         for (const child of Array.from(element.children)) {
-            children.push(...this.buildTree(child));
+            children.push(...this.buildSemanticTree(child));
         }
 
-        // Define interactive roles that we want to keep
+        // Interactive roles
         const interactiveRoles = [
             'button', 'link', 'textbox', 'checkbox', 'radio', 'combobox', 'listbox',
             'option', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'tab', 'switch',
             'slider', 'spinbutton', 'searchbox', 'scrollbar', 'progressbar'
         ];
 
-        // Define structural roles that provide context (keep if they have a name)
-        const structuralRoles = [
-            'heading', 'navigation', 'main', 'banner', 'contentinfo', 'complementary',
-            'form', 'region', 'article', 'alert', 'dialog', 'alertdialog', 'menu',
-            'menubar', 'tablist', 'tabpanel', 'tree', 'treegrid', 'grid', 'table',
-            'list', 'listitem', 'group'
-        ];
-
         const isInteractive = role && interactiveRoles.includes(role);
-        const isStructuralWithName = role && structuralRoles.includes(role);
         const hasTabindex = element.hasAttribute('tabindex') && element.getAttribute('tabindex') !== '-1';
         const isClickable = element.hasAttribute('onclick') || element.hasAttribute('data-click') ||
             (element as HTMLElement).onclick !== null;
 
-        // Determine if this element is worth keeping
-        const shouldKeep = isInteractive || hasTabindex || isClickable;
+        const isInteractiveElement = isInteractive || hasTabindex || isClickable;
 
-        // For structural elements without names, just flatten to children
-        if (!shouldKeep) {
-            // Keep structural with meaningful children or name
-            if (isStructuralWithName && children.length > 0) {
-                // Just return children flattened - structure is less important for LLM
-                return children;
+        // Check if this element has semantic label
+        const semanticLabel = getSemanticLabel(element);
+
+        // If interactive element, create a node with refId
+        if (isInteractiveElement) {
+            let name = computeAccessibleName(element);
+            if (!name) {
+                name = this.getFallbackName(element);
             }
-            return children;
+
+            this.counter++;
+            const refId = this.counter;
+            this.elementMap.set(refId, element);
+
+            const node: AXNode = {
+                refId: refId,
+                role: role || 'generic',
+                name: name || undefined,
+                tagName: tag,
+                attributes: this.getAttributes(element),
+                value: (element as HTMLInputElement).value || undefined,
+            };
+
+            // Include children if they exist (nested interactive elements)
+            if (children.length > 0) {
+                node.children = children;
+            }
+
+            return [node];
         }
 
-        // It's an interactive node - capture it
-        let name = computeAccessibleName(element);
-        if (!name) {
-            name = this.getFallbackName(element);
+        // If has semantic label and has interactive descendants, keep as container
+        if (semanticLabel && children.length > 0) {
+            return [{
+                role: role || 'group',
+                name: semanticLabel,
+                children: children
+            }];
         }
 
-        this.counter++;
-        const refId = this.counter;
-        this.elementMap.set(refId, element);
+        // Otherwise, hoist children up (skip this node)
+        return children;
+    }
 
-        return [{
-            refId: refId,
-            role: role || 'generic',
-            name: name,
-            tagName: tag,
-            attributes: this.getAttributes(element),
-            value: (element as HTMLInputElement).value || undefined,
-            children: children.length > 0 ? children : undefined
-        }];
+    public getElement(refId: number): Element | undefined {
+        return this.elementMap.get(refId);
     }
 
     /**

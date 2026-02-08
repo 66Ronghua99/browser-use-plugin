@@ -132,20 +132,21 @@ export class Sidebar {
     }
 
     public refresh() {
-        const nodes = this.manager.capture(document.body);
+        const tree = this.manager.captureTree(document.body);
         const list = this.shadow.getElementById('list');
-        if (!list) return;
+        if (!list || !tree) return;
 
         list.innerHTML = '';
         const flatList: AXNode[] = [];
-        this.flattenForDisplay(nodes, flatList);
+        this.flattenForDisplay([tree], flatList);
 
         flatList.forEach(node => {
+            if (!node.refId) return; // Skip container nodes without refId
             const el = document.createElement('div');
             el.className = 'node-item';
             el.innerHTML = `
                 <div class="node-header">
-                    <span class="role">${node.role} (tag: ${node.tagName})</span>
+                    <span class="role">${node.role} (tag: ${node.tagName || 'container'})</span>
                     <span class="ref-id">#${node.refId}</span>
                 </div>
                 ${node.name ? `<span class="name">"${node.name}"</span>` : ''}
@@ -157,11 +158,11 @@ export class Sidebar {
             `;
             list.appendChild(el);
 
-            el.querySelector('.btn-highlight')?.addEventListener('click', () => this.highlight(node.refId));
-            el.querySelector('.btn-click')?.addEventListener('click', () => this.click(node.refId));
+            el.querySelector('.btn-highlight')?.addEventListener('click', () => this.highlight(node.refId!));
+            el.querySelector('.btn-click')?.addEventListener('click', () => this.click(node.refId!));
             el.querySelector('.btn-input')?.addEventListener('click', () => {
                 const val = prompt('Enter text:');
-                if (val !== null) this.type(node.refId, val);
+                if (val !== null) this.type(node.refId!, val);
             });
         });
     }

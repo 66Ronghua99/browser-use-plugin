@@ -25,12 +25,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     if (message.action === 'GET_AX_TREE') {
         try {
-            const tree = axTreeManager.capture(document.body);
-            // Flatten the tree - remove children nesting
-            const flatNodes = flattenTree(tree);
+            const tree = axTreeManager.captureTree(document.body);
             sendResponse({
                 success: true,
-                data: flatNodes,
+                data: tree,
                 url: window.location.href,
                 title: document.title
             });
@@ -128,7 +126,7 @@ function executeAction(type: string, refId: number, text?: string): any {
 // Expose functions for manual debugging in console
 (window as any).getAXTree = () => {
     sidebar.refresh();
-    const tree = axTreeManager.capture(document.body);
+    const tree = axTreeManager.captureTree(document.body);
     console.log(JSON.stringify(tree, null, 2));
     return tree;
 };
