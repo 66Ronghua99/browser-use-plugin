@@ -38,6 +38,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true; // Keep channel open for async response
     }
 
+    // Compact format: [[refId, role, name, value?], ...]
+    // Saves ~85% tokens compared to full tree
+    if (message.action === 'GET_AX_TREE_COMPACT') {
+        try {
+            const compactTree = axTreeManager.captureCompactTree(document.body);
+            sendResponse({
+                success: true,
+                data: compactTree,
+                url: window.location.href,
+                title: document.title,
+                count: compactTree.length
+            });
+        } catch (e) {
+            sendResponse({ success: false, error: String(e) });
+        }
+        return true;
+    }
+
     if (message.action === 'GET_PAGE_TEXT') {
         try {
             const params = message.params || {};

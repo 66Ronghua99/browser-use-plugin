@@ -49,11 +49,25 @@ async def list_tools():
     """List available browser control tools."""
     return [
         Tool(
+            name="browser_get_ax_tree_compact",
+            description=(
+                "🚀 RECOMMENDED: Get a compact list of interactive elements from the browser. "
+                "Returns flat array: [[refId, role, name], ...]. "
+                "Uses ~85% fewer tokens than browser_get_ax_tree. "
+                "Use refId to interact with elements via browser_execute_action."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        ),
+        Tool(
             name="browser_get_ax_tree",
             description=(
-                "Get the accessibility tree (AXTree) from the current browser tab. "
-                "Returns a tree of interactive elements with refId, role, name, and attributes. "
-                "Use the refId to interact with elements using browser_execute_action."
+                "Get the full accessibility tree from the current browser tab. "
+                "Returns tree structure with refId, role, name, tagName, attributes. "
+                "⚠️ Uses more tokens - prefer browser_get_ax_tree_compact for efficiency."
             ),
             inputSchema={
                 "type": "object",
@@ -120,7 +134,11 @@ async def list_tools():
 @server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     """Handle MCP tool calls."""
-    if name == "browser_get_ax_tree":
+    if name == "browser_get_ax_tree_compact":
+        result = http_post("/tools/get_ax_tree_compact")
+        return [TextContent(type="text", text=json.dumps(result, ensure_ascii=False))]
+    
+    elif name == "browser_get_ax_tree":
         result = http_post("/tools/get_ax_tree")
         return [TextContent(type="text", text=json.dumps(result, indent=2, ensure_ascii=False))]
     

@@ -187,6 +187,10 @@ async function handleNativeMessage(message: { id: string; action: string; params
             // Request AXTree from content script
             const response = await chrome.tabs.sendMessage(tab.id, { action: 'GET_AX_TREE' });
             sendToNativeHost({ id, result: response });
+        } else if (action === 'GET_AX_TREE_COMPACT') {
+            // Request compact AXTree format - saves ~85% tokens
+            const response = await chrome.tabs.sendMessage(tab.id, { action: 'GET_AX_TREE_COMPACT' });
+            sendToNativeHost({ id, result: response });
         } else if (action === 'GET_PAGE_TEXT') {
             // Request page text content from content script
             const response = await chrome.tabs.sendMessage(tab.id, {

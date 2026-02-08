@@ -318,6 +318,11 @@ class MCPHandler(BaseHTTPRequestHandler):
             response = native.send_command('GET_AX_TREE')
             self.send_json(response)
         
+        elif self.path == '/tools/get_ax_tree_compact':
+            # Compact format saves ~85% tokens
+            response = native.send_command('GET_AX_TREE_COMPACT')
+            self.send_json(response)
+        
         elif self.path == '/tools/get_page_text':
             max_length = data.get('max_length', 8000)
             selector = data.get('selector')

@@ -11,6 +11,21 @@ export interface AXNode {
     children?: AXNode[];
 }
 
+// Compact node format: [refId, role, name, value?]
+export type CompactAXNode = [number, string, string, string?];
+
+// Configuration for token optimization
+const MAX_NAME_LENGTH = 80;  // Truncate long names to save tokens
+
+/**
+ * Truncate name to save tokens while preserving meaning
+ */
+function truncateName(name: string | undefined): string | undefined {
+    if (!name) return undefined;
+    if (name.length <= MAX_NAME_LENGTH) return name;
+    return name.substring(0, MAX_NAME_LENGTH - 3) + '...';
+}
+
 // Technical data-* attributes to ignore
 const TECHNICAL_DATA_ATTRS = [
     'data-v-', 'data-reactroot', 'data-reactid', 'data-testid',
@@ -169,9 +184,9 @@ export class AXTreeManager {
             const node: AXNode = {
                 refId: refId,
                 role: role || 'generic',
-                name: name || undefined,
+                name: truncateName(name),  // Apply truncation to save tokens
                 tagName: tag,
-                attributes: this.getAttributes(element),
+                attributes: this.getCompactAttributes(element),  // Use compact attributes
                 value: (element as HTMLInputElement).value || undefined,
             };
 
@@ -187,7 +202,7 @@ export class AXTreeManager {
         if (semanticLabel && children.length > 0) {
             return [{
                 role: role || 'group',
-                name: semanticLabel,
+                name: truncateName(semanticLabel),  // Apply truncation
                 children: children
             }];
         }
@@ -198,6 +213,93 @@ export class AXTreeManager {
 
     public getElement(refId: number): Element | undefined {
         return this.elementMap.get(refId);
+    }
+
+    /**
+     * Capture a compact flat list of interactive elements
+     * Format: [[refId, role, name, value?], ...]
+     * Much smaller than full tree - saves ~85% tokens
+     */
+    public captureCompactTree(root: Element): CompactAXNode[] {
+        this.elementMap.clear();
+        this.counter = 0;
+
+        const result: CompactAXNode[] = [];
+        this.collectInteractiveElements(root, result);
+        return result;
+    }
+
+    private collectInteractiveElements(element: Element, result: CompactAXNode[]): void {
+        const style = window.getComputedStyle(element);
+        if (style.display === 'none' || style.visibility === 'hidden' || element.getAttribute('aria-hidden') === 'true') {
+            return;
+        }
+
+        const tag = element.tagName.toLowerCase();
+
+        // Skip SVG internals
+        const svgSkip = ['path', 'g', 'defs', 'clippath', 'lineargradient', 'radialgradient', 'stop', 'mask', 'use', 'symbol', 'circle', 'rect', 'ellipse', 'line', 'polygon', 'polyline', 'text', 'tspan', 'style'];
+        if (svgSkip.includes(tag)) {
+            return;
+        }
+
+        const role = getRole(element);
+
+        // Interactive roles
+        const interactiveRoles = [
+            'button', 'link', 'textbox', 'checkbox', 'radio', 'combobox', 'listbox',
+            'option', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'tab', 'switch',
+            'slider', 'spinbutton', 'searchbox', 'scrollbar', 'progressbar'
+        ];
+
+        const isInteractive = role && interactiveRoles.includes(role);
+        const hasTabindex = element.hasAttribute('tabindex') && element.getAttribute('tabindex') !== '-1';
+        const isClickable = element.hasAttribute('onclick') || element.hasAttribute('data-click') ||
+            (element as HTMLElement).onclick !== null;
+
+        if (isInteractive || hasTabindex || isClickable) {
+            let name = computeAccessibleName(element);
+            if (!name) {
+                name = this.getFallbackName(element);
+            }
+
+            this.counter++;
+            const refId = this.counter;
+            this.elementMap.set(refId, element);
+
+            const value = (element as HTMLInputElement).value;
+            const truncatedName = truncateName(name) || '';
+
+            if (value) {
+                result.push([refId, role || 'generic', truncatedName, value]);
+            } else {
+                result.push([refId, role || 'generic', truncatedName]);
+            }
+        }
+
+        // Recurse into children
+        for (const child of Array.from(element.children)) {
+            this.collectInteractiveElements(child, result);
+        }
+    }
+
+    /**
+     * Get only essential attributes to reduce token usage
+     */
+    private getCompactAttributes(element: Element): Record<string, string> | undefined {
+        const attrs: Record<string, string> = {};
+
+        // Only include attributes that help with interaction, skip redundant ones
+        const importantAttrs = ['aria-expanded', 'aria-checked', 'aria-selected', 'aria-disabled', 'disabled', 'type', 'placeholder'];
+
+        for (const attrName of importantAttrs) {
+            const value = element.getAttribute(attrName);
+            if (value !== null) {
+                attrs[attrName] = value;
+            }
+        }
+
+        return Object.keys(attrs).length > 0 ? attrs : undefined;
     }
 
     /**

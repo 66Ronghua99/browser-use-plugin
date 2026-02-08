@@ -1,0 +1,14 @@
+{
+    "mcpServers": {
+        "browser-use": {
+            "command": "uv",
+            "args": [
+                "--directory",
+                "/Users/cory/codes/browser-use-plugin/native_host",
+                "run",
+                "python",
+                "mcp_stdio.py"
+            ]
+        }
+    }
+}
