@@ -52,7 +52,7 @@ async def list_tools():
             name="browser_get_ax_tree",
             description=(
                 "Get the accessibility tree (AXTree) from the current browser tab. "
-                "Returns a flat list of interactive elements with refId, role, name, and attributes. "
+                "Returns a tree of interactive elements with refId, role, name, and attributes. "
                 "Use the refId to interact with elements using browser_execute_action."
             ),
             inputSchema={
@@ -62,30 +62,56 @@ async def list_tools():
             }
         ),
         Tool(
+            name="browser_get_page_text",
+            description=(
+                "Extract readable text content from the current page. "
+                "Useful for reading email body, article content, etc. "
+                "Automatically finds main content areas (Gmail email body, articles, etc.)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "max_length": {
+                        "type": "integer",
+                        "description": "Maximum length of text to return (default: 8000)",
+                        "default": 8000
+                    },
+                    "selector": {
+                        "type": "string",
+                        "description": "Optional CSS selector to limit text extraction scope"
+                    }
+                },
+                "required": []
+            }
+        ),
+        Tool(
             name="browser_execute_action",
             description=(
-                "Execute an action on a browser element by its reference ID (refId from browser_get_ax_tree). "
-                "Supported actions: click, type, focus, scroll, hover, clear. "
-                "For 'type' action, provide the text parameter."
+                "Execute an action on a browser element or page. "
+                "Element actions (require ref_id): click, type, focus, scroll, hover, clear. "
+                "Global actions (no ref_id needed): keypress, scroll_page. "
+                "For 'type' action, provide the text parameter. "
+                "For 'keypress', use text like 'enter', 'escape', 'arrowdown'. "
+                "For 'scroll_page', use text like 'up', 'down', 'top', 'bottom'."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "action_type": {
                         "type": "string",
-                        "enum": ["click", "type", "focus", "scroll", "hover", "clear"],
+                        "enum": ["click", "type", "focus", "scroll", "hover", "clear", "keypress", "scroll_page"],
                         "description": "The action to perform"
                     },
                     "ref_id": {
                         "type": "integer",
-                        "description": "The refId of the element from browser_get_ax_tree"
+                        "description": "The refId of the element (not required for keypress/scroll_page)"
                     },
                     "text": {
                         "type": "string",
-                        "description": "Text to type (required for 'type' action)"
+                        "description": "Text to type, key to press, or scroll direction"
                     }
                 },
-                "required": ["action_type", "ref_id"]
+                "required": ["action_type"]
             }
         )
     ]
@@ -98,13 +124,29 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         result = http_post("/tools/get_ax_tree")
         return [TextContent(type="text", text=json.dumps(result, indent=2, ensure_ascii=False))]
     
+    elif name == "browser_get_page_text":
+        max_length = arguments.get("max_length", 8000)
+        selector = arguments.get("selector")
+        
+        result = http_post("/tools/get_page_text", {
+            "max_length": max_length,
+            "selector": selector
+        })
+        return [TextContent(type="text", text=json.dumps(result, indent=2, ensure_ascii=False))]
+    
     elif name == "browser_execute_action":
         action_type = arguments.get("action_type")
         ref_id = arguments.get("ref_id")
         text = arguments.get("text")
         
-        if not action_type or ref_id is None:
-            return [TextContent(type="text", text=json.dumps({"error": "Missing action_type or ref_id"}))]
+        # Global actions don't require ref_id
+        global_actions = ["keypress", "scroll_page"]
+        
+        if not action_type:
+            return [TextContent(type="text", text=json.dumps({"error": "Missing action_type"}))]
+        
+        if action_type not in global_actions and ref_id is None:
+            return [TextContent(type="text", text=json.dumps({"error": "Missing ref_id for this action_type"}))]
         
         result = http_post("/tools/execute_action", {
             "action_type": action_type,

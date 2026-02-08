@@ -318,13 +318,30 @@ class MCPHandler(BaseHTTPRequestHandler):
             response = native.send_command('GET_AX_TREE')
             self.send_json(response)
         
+        elif self.path == '/tools/get_page_text':
+            max_length = data.get('max_length', 8000)
+            selector = data.get('selector')
+            
+            response = native.send_command('GET_PAGE_TEXT', {
+                'maxLength': max_length,
+                'selector': selector
+            })
+            self.send_json(response)
+        
         elif self.path == '/tools/execute_action':
             action_type = data.get('action_type')
-            ref_id = data.get('ref_id')
+            ref_id = data.get('ref_id')  # Can be None for keypress/scroll_page
             text = data.get('text')
             
-            if not action_type or ref_id is None:
-                self.send_json({'error': 'Missing action_type or ref_id'}, 400)
+            # Global actions that don't require ref_id
+            global_actions = ['keypress', 'scroll_page']
+            
+            if not action_type:
+                self.send_json({'error': 'Missing action_type'}, 400)
+                return
+            
+            if action_type not in global_actions and ref_id is None:
+                self.send_json({'error': 'Missing ref_id for this action_type'}, 400)
                 return
             
             response = native.send_command('EXECUTE_ACTION', {
