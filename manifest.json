@@ -4,7 +4,8 @@
     "version": "1.0",
     "description": "Simplifies DOM tree into a denser abstraction (AXTree) for LLMs.",
     "permissions": [
-        "nativeMessaging"
+        "nativeMessaging",
+        "alarms"
     ],
     "background": {
         "service_worker": "dist/background.js"

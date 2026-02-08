@@ -202,30 +202,66 @@ uv run python mcp_stdio.py
 
 ## 🔧 调试技巧
 
+### 使用调试脚本 (推荐)
+
+```bash
+cd native_host
+./debug_native_host.sh
+```
+
+该脚本会自动检查：
+- Native Messaging manifest 配置
+- HTTP 服务器状态
+- 端口占用情况
+- 运行中的进程
+- 最近的日志
+- AXTree 获取测试
+
 ### 查看日志
 
 ```bash
+# MCP 服务器日志 (详细)
+tail -f /tmp/browser_use_mcp.log
+
 # Native Host 启动日志
 tail -f /tmp/browser_use_host_debug.log
-
-# MCP 服务器日志
-tail -f /tmp/browser_use_mcp.log
 ```
 
-### 手动测试 Native Messaging
+### 检查详细状态
 
-如果遇到连接问题，可以手动启动 HTTP 服务器进行测试：
+```bash
+# 基础健康检查
+curl http://127.0.0.1:8765/health
+
+# 详细状态信息 (包含心跳计数、连接状态等)
+curl http://127.0.0.1:8765/status | python3 -m json.tool
+```
+
+### Service Worker 控制台调试
+
+在 Chrome DevTools 的 Service Worker 控制台中：
+
+```javascript
+// 获取连接状态
+getNativeHostStatus()
+
+// 返回示例:
+// {
+//   connected: true,
+//   connectionAttempts: 0,
+//   lastHeartbeatTime: "2026-02-08T23:10:00.000Z",
+//   isConnecting: false
+// }
+```
+
+### 手动启动 HTTP 服务器 (测试模式)
 
 ```bash
 cd native_host
 uv run python mcp_server.py --http-only --port 8765
 ```
 
-然后用 curl 测试 HTTP 接口。
-
-### 控制台调试
-
-在网页控制台中可直接调用：
+### 网页控制台调试
 
 ```javascript
 // 获取 AXTree
@@ -240,6 +276,31 @@ window.executeAction('type', 1, '测试文本')
 ```
 
 ---
+
+## 🔄 稳定性机制
+
+### 心跳机制
+
+- 扩展每 **25 秒** 发送一次心跳 (PING)
+- Native Host 响应 PONG 消息
+- 防止 Service Worker 30 秒超时被挂起
+
+### 自动重连
+
+- 连接断开后使用 **指数退避** 策略重连
+- 初始延迟 1 秒，最大延迟 30 秒
+- 最多重试 10 次
+
+### chrome.alarms 唤醒
+
+- 每 30 秒触发一次 alarm
+- 确保 Service Worker 被唤醒检查连接状态
+
+### 端口冲突处理
+
+- 服务器启动时检测端口占用
+- 自动尝试清理旧进程
+- 最多重试 3 次
 
 ## ⚠️ 常见问题
 

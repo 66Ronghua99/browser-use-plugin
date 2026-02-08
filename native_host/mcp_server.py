@@ -8,6 +8,11 @@ Architecture:
 
 The Chrome Extension connects via connectNative(), this script is launched as Native Host.
 When running as Native Host, it also starts an HTTP server for MCP clients.
+
+Stability Features:
+- Heartbeat support for connection health monitoring
+- Graceful port conflict handling
+- Detailed logging with timestamps
 """
 
 import sys
@@ -16,21 +21,62 @@ import struct
 import threading
 import asyncio
 import logging
+import socket
+import os
+import signal
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Optional, Callable
 import time
+from datetime import datetime
 
-# Configure logging
+# Configure logging with more detail
 LOG_FILE = '/tmp/browser_use_mcp.log'
 logging.basicConfig(
     level=logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - %(message)s',
+    format='%(asctime)s - %(name)s - %(levelname)s - [%(funcName)s:%(lineno)d] %(message)s',
     handlers=[
         logging.FileHandler(LOG_FILE),
         logging.StreamHandler(sys.stderr)
     ]
 )
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('browser_use_mcp')
+
+# Track server state
+SERVER_START_TIME = datetime.now().isoformat()
+HEARTBEAT_COUNT = 0
+LAST_HEARTBEAT_TIME = None
+
+
+def is_port_in_use(port: int) -> bool:
+    """Check if a port is in use."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind(('127.0.0.1', port))
+            return False
+        except socket.error:
+            return True
+
+
+def kill_process_on_port(port: int) -> bool:
+    """Attempt to kill any process using the specified port."""
+    try:
+        import subprocess
+        result = subprocess.run(
+            ['lsof', '-ti', f':{port}'],
+            capture_output=True,
+            text=True
+        )
+        if result.stdout.strip():
+            pids = result.stdout.strip().split('\n')
+            for pid in pids:
+                if pid and pid != str(os.getpid()):
+                    logger.info(f"Killing process {pid} on port {port}")
+                    os.kill(int(pid), signal.SIGTERM)
+            time.sleep(0.5)
+            return True
+    except Exception as e:
+        logger.warning(f"Could not kill process on port {port}: {e}")
+    return False
 
 
 class NativeMessaging:
@@ -43,12 +89,14 @@ class NativeMessaging:
         self.running = False
         self.reader_thread = None
         self.on_extension_message: Optional[Callable] = None
+        self.connection_state = 'disconnected'
+        self.last_message_time = None
+        self.message_count = 0
     
     def read_message(self):
         """Read a message from stdin using Native Messaging protocol."""
         try:
             # Read 4-byte length prefix (little-endian unsigned int)
-            # This should block until data is available
             length_bytes = sys.stdin.buffer.read(4)
             if not length_bytes:
                 logger.debug("stdin closed (read returned empty)")
@@ -74,7 +122,9 @@ class NativeMessaging:
                 return None
             
             message = json.loads(message_bytes.decode('utf-8'))
-            logger.info(f"Received from extension: {message}")
+            self.last_message_time = datetime.now().isoformat()
+            self.message_count += 1
+            logger.info(f"Received from extension (msg #{self.message_count}): {message}")
             return message
         except Exception as e:
             logger.exception(f"Error reading message: {e}")
@@ -94,16 +144,35 @@ class NativeMessaging:
     
     def reader_loop(self):
         """Background thread reading from extension."""
+        global HEARTBEAT_COUNT, LAST_HEARTBEAT_TIME
+        
         logger.info("Reader loop started, waiting for messages from extension...")
+        self.connection_state = 'connected'
+        
         while self.running:
             message = self.read_message()
             if message is None:
                 # stdin closed means Chrome terminated the connection
                 logger.warning("Connection to extension lost, stopping reader")
+                self.connection_state = 'disconnected'
                 self.running = False
                 break
             
             logger.debug(f"Processing message: {message}")
+            
+            # Handle heartbeat (PING) messages
+            action = message.get('action')
+            if action == 'PING':
+                HEARTBEAT_COUNT += 1
+                LAST_HEARTBEAT_TIME = datetime.now().isoformat()
+                self.write_message({
+                    'action': 'PONG',
+                    'timestamp': message.get('timestamp'),
+                    'server_time': LAST_HEARTBEAT_TIME,
+                    'heartbeat_count': HEARTBEAT_COUNT
+                })
+                logger.debug(f"Heartbeat #{HEARTBEAT_COUNT} acknowledged")
+                continue
             
             # Check if this is a response to a pending request
             msg_id = message.get('id')
@@ -116,6 +185,7 @@ class NativeMessaging:
     def start(self):
         """Start the reader thread."""
         self.running = True
+        self.connection_state = 'connecting'
         self.reader_thread = threading.Thread(target=self.reader_loop, daemon=True)
         self.reader_thread.start()
         logger.info("Native Messaging reader started")
@@ -123,9 +193,13 @@ class NativeMessaging:
     def stop(self):
         """Stop the reader thread."""
         self.running = False
+        self.connection_state = 'stopped'
     
     def send_command(self, action: str, params: dict = None, timeout: float = 30.0):
         """Send command to extension and wait for response."""
+        if not self.running:
+            return {'error': 'Native messaging not connected'}
+        
         with self.lock:
             self.request_counter += 1
             msg_id = str(self.request_counter)
@@ -146,6 +220,16 @@ class NativeMessaging:
                 return {'error': 'Timeout waiting for extension response'}
         finally:
             del self.pending_requests[msg_id]
+    
+    def get_status(self):
+        """Get detailed connection status."""
+        return {
+            'state': self.connection_state,
+            'running': self.running,
+            'last_message_time': self.last_message_time,
+            'message_count': self.message_count,
+            'pending_requests': len(self.pending_requests)
+        }
 
 
 # Global native messaging instance
@@ -195,7 +279,27 @@ class MCPHandler(BaseHTTPRequestHandler):
                 ]
             })
         elif self.path == '/health':
-            self.send_json({'status': 'ok', 'native_connected': native.running})
+            self.send_json({
+                'status': 'ok',
+                'native_connected': native.running,
+                'server_start_time': SERVER_START_TIME,
+                'heartbeat_count': HEARTBEAT_COUNT,
+                'last_heartbeat_time': LAST_HEARTBEAT_TIME
+            })
+        elif self.path == '/status':
+            # Detailed status endpoint for debugging
+            self.send_json({
+                'server': {
+                    'start_time': SERVER_START_TIME,
+                    'pid': os.getpid(),
+                    'uptime_seconds': (datetime.now() - datetime.fromisoformat(SERVER_START_TIME)).total_seconds()
+                },
+                'native_messaging': native.get_status(),
+                'heartbeat': {
+                    'count': HEARTBEAT_COUNT,
+                    'last_time': LAST_HEARTBEAT_TIME
+                }
+            })
         else:
             self.send_json({'error': 'Not found'}, 404)
     
@@ -234,14 +338,34 @@ class MCPHandler(BaseHTTPRequestHandler):
             self.send_json({'error': 'Unknown endpoint'}, 404)
 
 
-def run_http_server(port=8765):
-    """Run HTTP server in background thread."""
+def run_http_server(port=8765, max_retries=3):
+    """Run HTTP server in background thread with port conflict handling."""
+    
     class ReusableHTTPServer(HTTPServer):
         allow_reuse_address = True
     
-    server = ReusableHTTPServer(('127.0.0.1', port), MCPHandler)
-    logger.info(f"HTTP MCP server listening on http://127.0.0.1:{port}")
-    server.serve_forever()
+    for attempt in range(max_retries):
+        if is_port_in_use(port):
+            logger.warning(f"Port {port} is in use (attempt {attempt + 1}/{max_retries})")
+            if attempt < max_retries - 1:
+                kill_process_on_port(port)
+                time.sleep(1)
+                continue
+            else:
+                logger.error(f"Could not acquire port {port} after {max_retries} attempts")
+                return
+        
+        try:
+            server = ReusableHTTPServer(('127.0.0.1', port), MCPHandler)
+            logger.info(f"HTTP MCP server listening on http://127.0.0.1:{port}")
+            server.serve_forever()
+            return
+        except socket.error as e:
+            logger.error(f"Socket error: {e}")
+            if attempt < max_retries - 1:
+                time.sleep(1)
+    
+    logger.error("Failed to start HTTP server")
 
 
 def main():
@@ -251,11 +375,20 @@ def main():
     parser.add_argument('--http-only', action='store_true', help='Run HTTP server only (no Native Messaging)')
     args = parser.parse_args()
     
-    logger.info(f"Starting Browser Use MCP Server (port={args.port})")
+    logger.info("=" * 60)
+    logger.info(f"Starting Browser Use MCP Server")
+    logger.info(f"  PID: {os.getpid()}")
+    logger.info(f"  Port: {args.port}")
+    logger.info(f"  Mode: {'HTTP-only' if args.http_only else 'Native Messaging + HTTP'}")
+    logger.info(f"  Log file: {LOG_FILE}")
+    logger.info("=" * 60)
     
     # Start HTTP server in background
     http_thread = threading.Thread(target=run_http_server, args=(args.port,), daemon=True)
     http_thread.start()
+    
+    # Give HTTP server time to start
+    time.sleep(0.5)
     
     if args.http_only:
         logger.info("Running in HTTP-only mode (no Native Messaging)")
@@ -263,7 +396,7 @@ def main():
             while True:
                 time.sleep(1)
         except KeyboardInterrupt:
-            pass
+            logger.info("Received keyboard interrupt")
     else:
         # Start Native Messaging reader
         native.start()
@@ -273,7 +406,7 @@ def main():
             while native.running:
                 time.sleep(1)
         except KeyboardInterrupt:
-            pass
+            logger.info("Received keyboard interrupt")
         finally:
             native.stop()
     
