@@ -7,8 +7,22 @@
 LOG="/tmp/browser_use_host_debug.log"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# uv is installed via anaconda
-UV_BIN="/Users/cory/anaconda3/bin/uv"
+# uv is installed via anaconda or pip
+UV_BIN=$(which uv || echo "")
+if [ -z "$UV_BIN" ]; then
+    # Fallback to check common locations if not in PATH
+    if [ -f "$HOME/.cargo/bin/uv" ]; then
+        UV_BIN="$HOME/.cargo/bin/uv"
+    elif [ -f "$HOME/anaconda3/bin/uv" ]; then
+        UV_BIN="$HOME/anaconda3/bin/uv"
+    elif [ -f "/opt/homebrew/bin/uv" ]; then
+        UV_BIN="/opt/homebrew/bin/uv"
+    else
+        echo "Error: 'uv' not found. Please install uv first."
+        exit 1
+    fi
+fi
+echo "✓ Found uv at: $UV_BIN"
 
 echo "=== Native Host Started ===" >> "$LOG"
 echo "Time: $(date)" >> "$LOG"

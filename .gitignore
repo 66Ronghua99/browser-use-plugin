@@ -44,3 +44,6 @@ intermediate_results/
 
 # TypeScript
 *.tsbuildinfo
+
+native_host/run_host.sh
+native_host/com.browser_use.mcp_host.json

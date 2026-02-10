@@ -1,9 +1,9 @@
 {
     "name": "com.browser_use.mcp_host",
     "description": "Browser Use MCP Host - Bridges LLM clients with browser extension",
-    "path": "/Users/cory/codes/browser-use-plugin/native_host/run_host.sh",
+    "path": "{{PROJECT_ROOT_DIRECTORY}}/native_host/run_host.sh",
     "type": "stdio",
     "allowed_origins": [
-        "chrome-extension://ljajelogmlifllgeaikflpmkfonlgaba/"
+        "chrome-extension://{{EXTENSION_ID_PLACEHOLDER}}/"
     ]
 }
